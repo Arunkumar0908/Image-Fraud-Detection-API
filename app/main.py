@@ -9,7 +9,7 @@ from sklearn.cluster import DBSCAN
 from itertools import combinations
 from dotenv import load_dotenv
 from app.image_features import compute_similarity_matrix
-from app.objectDetection import classify_with_clip_augmented, handle_featureless
+# from app.objectDetection import classify_with_clip_augmented, handle_featureless
 from PIL import Image
 
 UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
@@ -132,16 +132,16 @@ def grouped_image_similarity(radius_km: float = 0.5, similarity_threshold: float
 
     return JSONResponse({"groups": groups})
 
-@app.post("/detect-shop")
-async def detect_shop(file: UploadFile = File(...)):
-    try:
-        with Image.open(file.file) as img:
-            result = handle_featureless(img)
-            if result:
-                return {"result": result}
+# @app.post("/detect-shop")
+# async def detect_shop(file: UploadFile = File(...)):
+#     try:
+#         with Image.open(file.file) as img:
+#             result = handle_featureless(img)
+#             if result:
+#                 return {"result": result}
 
-            category = classify_with_clip_augmented(img)
-            return {"result": category}
+#             category = classify_with_clip_augmented(img)
+#             return {"result": category}
 
-    except Exception as e:
-        return {"error": f"Invalid image file: {str(e)}"}
+#     except Exception as e:
+#         return {"error": f"Invalid image file: {str(e)}"}
