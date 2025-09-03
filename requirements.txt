@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+pillow
+imagehash
+python-multipart
+pymongo
+numpy==1.26.4
+scikit-learn
+python-dotenv
+boto3
+torch>=2.2.0,<3.0
+torchvision>=0.17.0,<1.0
+transformers>=4.40.0,<5.0
+easyocr
+annoy
+opencv-python
