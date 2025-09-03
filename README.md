@@ -4,7 +4,7 @@ A FastAPI-based backend service to detect duplicate or fraudulent merchant image
 
 ## Features
 - Merchant registration with multiple images
-- Image embeddings via CLIP for similarity comparison
+- Image embeddings via CLIP & ResNet50 for similarity comparison
 - Perceptual, average, difference, and wavelet hashing for robustness
 - DBSCAN clustering for geo-location grouping
 - Duplicate detection with configurable similarity thresholds
