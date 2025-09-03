@@ -28,22 +28,10 @@ merchants_collection.create_index([("location", GEOSPHERE)])
 def ping():
     return {"message": "pong"}
 
-def flatten_features(features):
-    if isinstance(features, dict) and "embeddings" in features:
-        emb = features["embeddings"]
-        if isinstance(emb[0], list):
-            return emb[0]
-        return emb
-    return features
-
 def register_merchant(front_bytes, nameboard_bytes, inside_bytes, lat, lon, merchant_info):
     front_features = extract_image_features(front_bytes)
     nameboard_features = extract_image_features(nameboard_bytes)
     inside_features = extract_image_features(inside_bytes)
-
-    front_features["embeddings"] = flatten_features(front_features)
-    nameboard_features["embeddings"] = flatten_features(nameboard_features)
-    inside_features["embeddings"] = flatten_features(inside_features)
 
     new_imgs = [front_features, nameboard_features, inside_features]
 
