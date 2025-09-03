@@ -16,6 +16,7 @@ A FastAPI-based backend service to detect duplicate or fraudulent merchant image
 - **FastAPI**
 - **MongoDB**
 - **scikit-learn**
+- **PyTorch (ResNet-50)**
 - **NumPy / PIL**
 - **CLIP (OpenAI)**
 
