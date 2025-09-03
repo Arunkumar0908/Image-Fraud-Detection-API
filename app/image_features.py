@@ -1,13 +1,14 @@
+
 import io
 import torch
 import numpy as np
 import imagehash
 from PIL import Image, ExifTags, ImageEnhance, ImageFilter, ImageOps
-import torchvision.transforms as transforms
 from torchvision.models import resnet50, ResNet50_Weights
 from typing import List, Dict
 import logging
 from functools import lru_cache
+import torchvision.transforms as transforms
 from sklearn.metrics.pairwise import cosine_similarity as sklearn_cosine_similarity
 import random
 
@@ -19,13 +20,12 @@ logger.info(f"Using device: {device}")
 
 resnet = resnet50(weights=ResNet50_Weights.DEFAULT).to(device)
 resnet.eval()
-resnet = torch.nn.Sequential(*list(resnet.children())[:-1])
 
 preprocess = transforms.Compose([
-    transforms.Resize(256),
-    transforms.CenterCrop(224),
+    transforms.Resize((224, 224)),
     transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                         std=[0.229, 0.224, 0.225]),
 ])
 
 @lru_cache(maxsize=128)
@@ -46,7 +46,9 @@ def correct_orientation(image: Image.Image) -> Image.Image:
         logger.warning(f"Error correcting orientation: {e}")
     return image
 
-def extract_embeddings_batch(images: List[Image.Image], model, preprocess, device="cuda") -> np.ndarray:
+def extract_embeddings_batch(images: List[Image.Image], model, preprocess, device=None) -> np.ndarray:
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
     batch_tensors = []
     for img in images:
         if not isinstance(img, Image.Image):
@@ -55,22 +57,37 @@ def extract_embeddings_batch(images: List[Image.Image], model, preprocess, devic
         tensor = preprocess(img)
         batch_tensors.append(tensor)
     batch = torch.stack(batch_tensors).to(device)
-    
     with torch.no_grad():
         features = model(batch)
         features = features.view(features.size(0), -1)
         embeddings = features.cpu().numpy()
-    
     norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-    norms[norms == 0] = 1 
+    norms[norms == 0] = 1
     embeddings = embeddings / norms
     return embeddings
+
+def extract_image_features(image_bytes: bytes, model=None, preprocess=None, device=None) -> Dict:
+    if model is None:
+        model = resnet
+    if preprocess is None:
+        preprocess = globals()['preprocess']
+    if device is None:
+        device = globals()['device']
+    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    image = correct_orientation(image)
+    embeddings = extract_embeddings_from_augmented(image, model, preprocess, device)
+    hashes = extract_multiple_hashes(image)
+    return {
+        "embeddings": embeddings.tolist(),
+        "hashes": hashes,
+        "embedding_mean": np.mean(embeddings, axis=0).tolist(),
+        "embedding_std": np.std(embeddings, axis=0).tolist()
+    }
 
 def smart_augment_image(image: Image.Image, max_augmentations: int = 24) -> List[Image.Image]:
     augmented_images = [image]
     rotation_angles = list(range(5, 360, 5))
     rotation_augmentations = [lambda img, angle=angle: img.rotate(angle, expand=True) for angle in rotation_angles]
-
     other_augmentations = [
         lambda img: img.transpose(Image.Transpose.FLIP_LEFT_RIGHT),
         lambda img: img.transpose(Image.Transpose.FLIP_TOP_BOTTOM),
@@ -112,32 +129,14 @@ def extract_multiple_hashes(image: Image.Image) -> Dict[str, str]:
         "wavelet_hash": str(imagehash.whash(image))
     }
 
-def extract_image_features(image_bytes: bytes, model=None, preprocess=None, device=None) -> Dict:
-    if model is None:
-        model = resnet
-    if preprocess is None:
-        preprocess = globals()['preprocess']
-    if device is None:
-        device = globals()['device']
-    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    image = correct_orientation(image)
-    embeddings = extract_embeddings_from_augmented(image, model, preprocess, device)
-    hashes = extract_multiple_hashes(image)
-    return {
-        "embeddings": embeddings.tolist(),
-        "hashes": hashes,
-        "embedding_mean": np.mean(embeddings, axis=0).tolist(),
-        "embedding_std": np.std(embeddings, axis=0).tolist()
-    }
-
 def compute_similarity_matrix(embeddings1: np.ndarray, embeddings2: np.ndarray) -> float:
-    if len(embeddings1) == 0 or len(embeddings2) == 0:
+    if embeddings1.ndim == 1:
+        embeddings1 = embeddings1.reshape(1, -1)
+    if embeddings2.ndim == 1:
+        embeddings2 = embeddings2.reshape(1, -1)
+    if embeddings1.size == 0 or embeddings2.size == 0:
         return 0.0
-
-    emb1 = np.atleast_2d(embeddings1)
-    emb2 = np.atleast_2d(embeddings2)
-
-    similarity_matrix = sklearn_cosine_similarity(emb1, emb2)
+    similarity_matrix = sklearn_cosine_similarity(embeddings1, embeddings2)
     return float(np.max(similarity_matrix))
 
 def compute_hash_similarity(hashes1: Dict[str, str], hashes2: Dict[str, str]) -> Dict[str, float]:
@@ -160,7 +159,7 @@ def is_duplicate_merchant(
     new_imgs: List[Dict], 
     existing_merchants: List[Dict], 
     phash_threshold: float = 0.70,
-    embedding_threshold: float = 0.75,
+    embedding_threshold: float = 0.70,
     use_ensemble: bool = True
 ) -> List[Dict]:
     duplicate_matches = []
@@ -176,26 +175,35 @@ def is_duplicate_merchant(
                 continue
 
             db_embeddings = np.array(db_img.get("embeddings", []))
-            db_hashes = db_img.get("hashes", {})
+            db_mean = np.array(db_img.get("embedding_mean", []))
             new_embeddings = np.array(new_img.get("embeddings", []))
+            new_mean = np.array(new_img.get("embedding_mean", []))
+            db_hashes = db_img.get("hashes", {})
             new_hashes = new_img.get("hashes", {})
 
             if len(db_embeddings) == 0 or len(new_embeddings) == 0:
                 continue
 
             embedding_sim = compute_similarity_matrix(new_embeddings, db_embeddings)
+
+            mean_sim = 0.0
+            if db_mean.size > 0 and new_mean.size > 0:
+                mean_sim = compute_similarity_matrix(db_mean, new_mean)
+
+            final_embedding_sim = max(embedding_sim, mean_sim)
+
             hash_similarities = compute_hash_similarity(new_hashes, db_hashes)
 
             if use_ensemble:
                 weights = {
                     "embedding": 0.8,
-                    "perceptual_hash": 0.1,#structure 
-                    "average_hash": 0.05,#brightness
-                    "difference_hash": 0.025,#edges #shapes
-                    "wavelet_hash": 0.025#texture #patterns
+                    "perceptual_hash": 0.1,
+                    "average_hash": 0.05,
+                    "difference_hash": 0.025,
+                    "wavelet_hash": 0.025
                 }
                 ensemble_score = (
-                    weights["embedding"] * embedding_sim +
+                    weights["embedding"] * final_embedding_sim +
                     weights["perceptual_hash"] * hash_similarities.get("perceptual_hash", 0) +
                     weights["average_hash"] * hash_similarities.get("average_hash", 0) +
                     weights["difference_hash"] * hash_similarities.get("difference_hash", 0) +
@@ -205,19 +213,20 @@ def is_duplicate_merchant(
                 final_similarity = ensemble_score
             else:
                 best_hash_sim = max(hash_similarities.values()) if hash_similarities else 0
-                is_duplicate = best_hash_sim >= phash_threshold or embedding_sim >= embedding_threshold
-                final_similarity = max(embedding_sim, best_hash_sim)
+                is_duplicate = best_hash_sim >= phash_threshold or final_embedding_sim >= embedding_threshold
+                final_similarity = max(final_embedding_sim, best_hash_sim)
 
             risk_percent = round(final_similarity * 100, 2)
 
             if is_duplicate:
                 duplicate_matches.append({
                     "existing_merchant_id": merchant.get("merchant_id"),
-                    "existing_merchant_name": merchant.get("merchant_name") or merchant.get("name"),
+                    "existing_merchant_name": merchant.get("name"),
+                    "existing_contact": merchant.get("contact"),
                     "existing_latitude": merchant.get("latitude"),
                     "existing_longitude": merchant.get("longitude"),
                     "matched_image_type": img_type,
-                    "embedding_similarity": float(embedding_sim),
+                    "embedding_similarity": float(final_embedding_sim),
                     "hash_similarities": hash_similarities,
                     "final_similarity": float(final_similarity),
                     "risk_percent": risk_percent,
