@@ -21,8 +21,7 @@ A FastAPI-based backend service to detect duplicate or fraudulent merchant image
 
 ## Setup
 
-### 1. Clone repo
-
+###1. Clone repo
 ```bash
 git clone https://github.com/Arunkumar0908/Image-Fraud-Detection-API.git
 cd Image-Fraud-Detection-API
